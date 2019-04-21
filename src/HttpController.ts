@@ -7,6 +7,7 @@ import { DbCollectionInterface } from "serendip-business-model";
 import * as request from "request";
 import { ControllerService } from "./ControllerService";
 import ObjectID, * as ObjectId from 'bson-objectid';
+import { SocketService } from "./SocketService";
 export class HttpController implements HttpControllerInterface {
     constructor(private controllerService: ControllerService) { }
     onRequest(req, res, next) {
@@ -114,7 +115,37 @@ export class HttpController implements HttpControllerInterface {
         route: "/api/collection/:collection/find",
         actions: [
             async (req, res, next, done) => {
-                done(500);
+
+                if (!req.body.skip)
+                    req.body.skip = 0;
+
+                if (!req.body.limit)
+                    req.body.limit = 0;
+
+                let models = [];
+                for (const twin of this.controllerService.grid.twins) {
+                    for (const nodeName of twin) {
+                        let count = 0;
+                        const node = this.controllerService.grid.infs[nodeName];
+                        try {
+
+                            count += (await this.post(node.address, req.url, req.body)) as any;
+
+
+                            if (count < req.body.skip) {
+                                req.body.skip -= count;
+                                break;
+                            }
+
+
+                            models = models.concat(await this.post(node.address, req.url, req.body));
+
+                            break;
+                        } catch (error) {
+                        }
+                    }
+                }
+                res.json(models);
             }
         ]
     };
@@ -128,19 +159,17 @@ export class HttpController implements HttpControllerInterface {
 
                 let count = 0;
 
-                for (const key in this.controllerService.grid.infs) {
-                    if (this.controllerService.grid.infs.hasOwnProperty(key)) {
-                        const node = this.controllerService.grid.infs[key];
-                        if (node.type == 'peer') {
-                            try {
-                                count += (await this.post(node.address, req.url, req.body)) as any;
-
-                            } catch (error) {
-                                console.error(error);
-                            }
+                for (const twin of this.controllerService.grid.twins) {
+                    for (const nodeName of twin) {
+                        const node = this.controllerService.grid.infs[nodeName];
+                        try {
+                            count += (await this.post(node.address, req.url, req.body)) as any;
+                            break;
+                        } catch (error) {
                         }
                     }
                 }
+
                 res.json(count);
 
             }
@@ -153,7 +182,6 @@ export class HttpController implements HttpControllerInterface {
         route: "/api/collection/:collection/insertOne",
         actions: [
             async (req, res, next, done) => {
-
                 if (req.body.model && !req.body.model._id)
                     req.body.model._id = new ObjectID().str;
 
@@ -162,7 +190,19 @@ export class HttpController implements HttpControllerInterface {
                 let model;
                 for (const twin of this.controllerService.grid.twins) {
 
+
                     for (const nodeName of twin) {
+
+                        const nodeStat = this.controllerService.grid.infs[nodeName].stat;
+                        console.log(this.controllerService.grid.infs[nodeName].hard * 1024, nodeStat.storageMB);
+                        if (this.controllerService.grid.infs[nodeName].hard * 1024 <= nodeStat.storageMB) {
+
+                            console.log('node is full', nodeStat);
+                            break;
+
+                        }
+
+
                         const node = this.controllerService.grid.infs[nodeName];
                         try {
                             model = await this.post(node.address, req.url, req.body);
@@ -172,27 +212,28 @@ export class HttpController implements HttpControllerInterface {
 
                         }
                     }
-
                     if (!indexTwin[Object.keys(indexTwin)[0]] && !indexTwin[Object.keys(indexTwin)[0]]) {
                         indexTwin = {};
                     } else
                         break;
-
                 }
 
-                await this.controllerService.indexing.insertOne({
-                    peers: indexTwin,
-                    docId: model._id,
-                    collection: req.params.collection,
-                    business: model._business,
-                    entity: model._entity,
-                    user: model._vuser
-                });
+                if (model && model._id) {
+                    await this.controllerService.indexing.insertOne({
+                        peers: indexTwin,
+                        docId: model._id,
+                        type: 'insert',
+                        collection: req.params.collection,
+                        business: model._business,
+                        entity: model._entity,
+                        user: model._vuser
+                    });
 
-                res.json(model);
+                    res.json(model);
 
-
-
+                } else {
+                    done(500);
+                }
             }
         ]
     };
@@ -203,7 +244,41 @@ export class HttpController implements HttpControllerInterface {
         route: "/api/collection/:collection/updateOne",
         actions: [
             async (req, res, next, done) => {
-                done(500);
+
+                if (req.body.model && !req.body.model._id)
+                    req.body.model._id = new ObjectID().str;
+
+                let indexTwin = {};
+
+                let model;
+                for (const twin of this.controllerService.grid.twins) {
+                    for (const nodeName of twin) {
+                        const node = this.controllerService.grid.infs[nodeName];
+                        try {
+                            model = await this.post(node.address, req.url, req.body);
+                            indexTwin[nodeName] = true;
+                        } catch (error) {
+                            indexTwin[nodeName] = false;
+
+                        }
+                    }
+                    if (!indexTwin[Object.keys(indexTwin)[0]] && !indexTwin[Object.keys(indexTwin)[0]]) {
+                        indexTwin = {};
+                    } else
+                        break;
+                }
+
+                await this.controllerService.indexing.insertOne({
+                    peers: indexTwin,
+                    docId: model._id,
+                    type: 'update',
+                    collection: req.params.collection,
+                    business: model._business,
+                    entity: model._entity,
+                    user: model._vuser
+                });
+
+                res.json(model);
             }
         ]
     };
@@ -214,7 +289,36 @@ export class HttpController implements HttpControllerInterface {
         route: "/api/collection/:collection/deleteOne",
         actions: [
             async (req, res, next, done) => {
-                done(500);
+
+                let indexTwin = {};
+                let model;
+                for (const twin of this.controllerService.grid.twins) {
+                    for (const nodeName of twin) {
+                        const node = this.controllerService.grid.infs[nodeName];
+                        try {
+                            model = await this.post(node.address, req.url, req.body);
+                            indexTwin[nodeName] = true;
+                        } catch (error) {
+                            indexTwin[nodeName] = false;
+
+                        }
+                    }
+                    if (!indexTwin[Object.keys(indexTwin)[0]] && !indexTwin[Object.keys(indexTwin)[0]]) {
+                        indexTwin = {};
+                    } else
+                        break;
+                }
+                await this.controllerService.indexing.insertOne({
+                    peers: indexTwin,
+                    docId: model._id,
+                    type: 'delete',
+                    collection: req.params.collection,
+                    business: model._business,
+                    entity: model._entity,
+                    user: model._vuser
+                });
+
+                res.json(model);
             }
         ]
     };

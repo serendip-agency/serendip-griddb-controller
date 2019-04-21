@@ -13,6 +13,16 @@ export class ControllerService implements ServerServiceInterface {
         address: string;
         type: string;
         secret: string;
+        stat: {
+          db: string;
+          collections: number;
+          indexes: number;
+          avgObjSizeByte: number;
+          objects: number;
+          storageMB: number;
+          fsUsedMB: number;
+          fsTotalMB: number;
+        }
       };
     };
     twins: string[][]

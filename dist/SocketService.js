@@ -47,6 +47,7 @@ class SocketService {
                     return socket.terminate();
                 if (data.type == "stat") {
                     socket.nodeStat = data.model;
+                    this.controllerService.grid.infs[socket.nodeName].stat = data.model;
                     return;
                 }
                 console.log(data);

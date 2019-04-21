@@ -23,6 +23,8 @@ export class SocketService implements ServerServiceInterface {
 
 
     this.wss.on("connection", (socket: CustomWebSocket, req) => {
+
+
       console.log("new socket connection", req.socket.remoteAddress, req.url);
 
       socket.on("close", (code, reason) => {
@@ -61,6 +63,10 @@ export class SocketService implements ServerServiceInterface {
 
         if (data.type == "stat") {
           socket.nodeStat = data.model;
+
+          this.controllerService.grid.infs[socket.nodeName].stat = data.model;
+
+
           return;
         }
 
